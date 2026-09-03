@@ -1,0 +1,13 @@
+description: "netgraph: the mesh as a picture — this node's own routing and interface truth, plus Reticulum's remote-management service crawled node by node."
+url: https://github.com/reticulous/netgraph
+version: "0.1.0"
+license: "Apache-2.0"
+targets:
+  - esp32s3
+dependencies:
+  idf:
+    version: ">=5.5"
+  # Cross-straddle deps (spangap-core, rns) are declared in straddle.yaml's
+  # `requires:`, not here — they're satisfied at the consumer's build time by
+  # the staging step, so CMakeLists.txt's `REQUIRES` lines can use short,
+  # fork-friendly names.
