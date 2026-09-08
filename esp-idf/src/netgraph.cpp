@@ -1143,7 +1143,7 @@ int s_ndir = 0;
  * back to us is never drawn. It is the reciprocal half of every edge we have,
  * which is precisely what the reach rule needs to close a line. */
 /* Every destination this node hosts, not just its node-level ones: rnsd's own
- * probe and management, plus one per consumer — lxmf, nomad, rlpg, netgraph. */
+ * probe and management, plus one per consumer — lxmf, nomad, lxmproxy, netgraph. */
 #define NG_MAX_OWN_DESTS 16
 uint8_t s_ownDest[NG_MAX_OWN_DESTS][RNSD_DEST_HASH_LEN];
 int     s_nOwnDest = 0;
