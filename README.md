@@ -102,7 +102,7 @@ Precedence for the same adjacency, strongest first: `route1`, `route2`,
 class held for it — a pair we both route to and hear is one line, not two.
 
 **Records are never announced.** The builder, the store, the resolver and the
-Channel server all work, but a record flooded per node per announce beat does
+Channel server all work, but a record flooded per node per announce tick does
 not scale on LoRa, so the push path and the sync beat that depends on it are
 commented out at their call sites. `netgraph sync <hash>` still runs an exchange
 by hand. See `plans/netgraph.md`.
@@ -208,7 +208,7 @@ ln|tcp_in/10.0.0.4#0|1|55aa66bb.0.t
   no other node could join it to anything anyway.
 - `up` — a way OUT of the community: `up|<class>|<iface>|<address>`, one per
   radius-0 point-to-point interface whose far end rnsd has named. **The
-  community radius is not a display filter** — it says how far to go looking for
+  service radius is not a display filter** — it says how far to go looking for
   nodes to *serve*, where to stop reaching, and nothing about what is worth
   drawing. It is used here only to decide what the far end IS: rnsd keeps no
   peer rows for a radius-0 interface, so there can never be destination-level
@@ -255,7 +255,7 @@ one `storageBegin`/`storageEnd` bracket so a reader sees one coalesced patch:
 
 ```
 netgraph.self                own identity hash, hex
-netgraph.radius              community radius in force
+netgraph.radius              service radius in force
 netgraph.nodes.slots         walk bound
 netgraph.nodes.<i>.id        identity hash hex ("" = known only by address)
 netgraph.nodes.<i>.name      display name (may be "")
@@ -453,7 +453,7 @@ else.
 | `s.netgraph.community` | *(empty)* | The community's name. With `s.netgraph.passphrase` it derives the community keypair; empty means no community — the node serves and draws, and announces no membership. |
 | `s.netgraph.passphrase` | *(empty)* | The community's passphrase. An ordinary setting rather than a secret: every node in the community holds it, and the *derived* key is what lives in the secrets tier. Changing either re-derives, re-pushes the allow list and re-airs the membership announce. |
 | `s.netgraph.serve` | `1` | Answer `/path` and `/status` on the stock management address. Only the community and the identities below may ask; an unidentified request is refused. |
-| `s.netgraph.allow.<i>.{id,hash}` | — | Identity hashes allowed to query this node besides the community, as a collection the settings pane binds rows to. Same form as stock `remote_management_allowed`, so a line copies straight across either way. Written only through the `netgraph.allow.add`/`.remove` sentinels, which is why no UI parses a hash. |
+| `s.netgraph.allow.<i>.{id,hash}` | — | Identity hashes allowed to query this node besides the community, as a collection the settings pane binds rows to. Same form as stock `remote_management_allowed`, so a line copies straight across either way. Written only through the `netgraph.allow.add`/`.remove` command keys, which is why no UI parses a hash. |
 | `s.netgraph.radius` | `2` | How many hops out a crawl goes. |
 | `s.netgraph.crawl_timeout_s` | `20` | How long one visit may take before the crawl gives up on that node and moves to the next. |
 | `s.netgraph.heard_h` | `3` | Evidence unheard for this long leaves the drawing. Lines are removed rather than dimmed: everything on the picture is current. |
@@ -474,7 +474,7 @@ else.
 | `netgraph.allow.{done,error}` | Acknowledgement counter and the rejection sentence the add form shows. |
 | `s.netgraph.seq` | State, not a setting: the last sequence number this node issued for its own record. Persisted so a reboot with a bad clock cannot re-issue an old one. |
 
-### Command sentinels (read, self-clearing)
+### Command keys (read, self-clearing)
 
 Same convention as rnsd's: write a value and the netgraph task consumes it.
 `netgraph.crawl.req` is a rising value rather than a flag — two crawls in a row
