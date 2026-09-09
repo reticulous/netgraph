@@ -2278,13 +2278,30 @@ void ngResolve() {
 
     /* Which layer produced what. A graph that draws nothing says where it was
      * lost: no route1 and no heard means rnsd's tables are empty, edges but no
-     * lines means the browser. */
-    info("resolved: %d vertice%s, %d link%s — %d route1, %d route2, %d heard, "
-         "%d record (%d unresolved)",
-         r->nverts, r->nverts == 1 ? "" : "s",
-         r->nedges, r->nedges == 1 ? "" : "s",
-         byEv[NG_EV_ROUTE1], byEv[NG_EV_ROUTE2], byEv[NG_EV_HEARD],
-         byEv[NG_EV_RECORD], unresolved);
+     * lines means the browser.
+     *
+     * Only when the ANSWER moves. A resolve runs whenever its inputs change,
+     * and plenty of those changes — a route relearned over the same interface,
+     * a peer's slot reused — produce the identical graph; saying so again is a
+     * line that carries no information and buries the one that does. What a
+     * reader wants from this log is the shape of the graph and when it last
+     * changed, and that is exactly what a de-duplicated line gives them. The
+     * resolve itself is unaffected: it still runs, still publishes. */
+    static char lastSummary[128];
+    char summary[128];
+    std::snprintf(summary, sizeof summary,
+                  "%d vert%s, %d link%s — %d route1, %d route2, %d heard, "
+                  "%d record (%d unresolved)",
+                  r->nverts, r->nverts == 1 ? "ex" : "ices",
+                  r->nedges, r->nedges == 1 ? "" : "s",
+                  byEv[NG_EV_ROUTE1], byEv[NG_EV_ROUTE2], byEv[NG_EV_HEARD],
+                  byEv[NG_EV_RECORD], unresolved);
+    if (std::strcmp(summary, lastSummary) != 0) {
+        std::memcpy(lastSummary, summary, sizeof lastSummary);
+        info("resolved: %s", summary);
+    } else {
+        dbg("resolved: %s (unchanged)", summary);
+    }
     if (r->nedges >= NG_MAX_LINKS)
         warn("link table full at %d — the graph is truncated", NG_MAX_LINKS);
     if (r->nverts >= NG_MAX_VERTS)
@@ -2402,17 +2419,36 @@ void ngRebuild() {
         units += b->ifs[i].nunits;
         for (int k = 0; k < b->ifs[i].nunits; k++) if (b->ifs[i].units[k].have_prefix) celled++;
     }
-    info("record rebuilt: seq=%u %zu B — %d iface%s, %d link%s (%d with a destination), "
-         "%d uplink%s, %d dest%s; announced %zu B%s",
-         (unsigned)seq, nf,
-         b->nifs, b->nifs == 1 ? "" : "s",
-         units, units == 1 ? "" : "s", celled,
-         b->nups, b->nups == 1 ? "" : "s",
-         b->ndt, b->ndt == 1 ? "" : "s",
-         na, cutAbr ? " (abridged)" : "");
-    if (b->nifs && !celled)
+    /* The seq moves on every rebuild by definition, so it is kept out of what
+     * is compared — otherwise every line is "new" and the de-duplication buys
+     * nothing. What a reader is watching for is the COMPOSITION changing. */
+    static char lastComp[160];
+    char comp[160];
+    std::snprintf(comp, sizeof comp,
+                  "%d iface%s, %d link%s (%d with a destination), "
+                  "%d uplink%s, %d dest%s%s",
+                  b->nifs, b->nifs == 1 ? "" : "s",
+                  units, units == 1 ? "" : "s", celled,
+                  b->nups, b->nups == 1 ? "" : "s",
+                  b->ndt, b->ndt == 1 ? "" : "s",
+                  cutAbr ? " (abridged)" : "");
+    if (std::strcmp(comp, lastComp) != 0) {
+        std::memcpy(lastComp, comp, sizeof lastComp);
+        info("record rebuilt: seq=%u %zu B — %s; announced %zu B",
+             (unsigned)seq, nf, comp, na);
+    } else {
+        dbg("record rebuilt: seq=%u %zu B — %s; announced %zu B (unchanged)",
+            (unsigned)seq, nf, comp, na);
+    }
+    /* Once per transition into the state, not once per rebuild: it is a
+     * standing condition (nothing has announced to us yet), and at boot that is
+     * every rebuild until the first neighbour's announce lands. */
+    static bool wasCellless = false;
+    const bool cellless = b->nifs && !celled;
+    if (cellless && !wasCellless)
         warn("record has interfaces but no link cells — rnsd reports no announced "
              "peer on any of them, so no node can draw a line to us");
+    wasCellless = cellless;
 }
 
 /* ── has anything the GRAPH is drawn from moved? ──
@@ -3453,12 +3489,24 @@ void ngMemberNote(const uint8_t* id, const uint8_t* dest, bool member,
         char h[2 * RNSD_IDENT_HASH_LEN + 1];
         hex(h, id, RNSD_IDENT_HASH_LEN);
         if (member)
-            info("announce from %s: ours, %zu B, name=%s, transport=%d", h,
+            info("announce from %s: a member, %zu B, name=%s, transport=%d", h,
                  app_n, m.name[0] ? m.name : "(none)", transport ? 1 : 0);
-        else
-            info("announce from %s: not ours (%s), %zu B%s", h,
-                 why ? why : "?", app_n,
+        /* Two of the reasons are settled before the frame is even looked at, so
+         * they say nothing about the sender and cannot ever say anything else:
+         * `empty` is an announce carrying no app_data (there was nothing to
+         * open), and `no community here` is this node having no community
+         * configured, which makes EVERY announce it will ever hear a non-member.
+         * Logging those is a line per neighbour for a fact about ourselves. What
+         * is worth a line is a community being set and a frame still failing —
+         * that separates "somebody else's community" from "arrived damaged". */
+        else if (why && std::strcmp(why, "empty") != 0 &&
+                        std::strcmp(why, "no community here") != 0)
+            info("announce from %s: not a member (%s), %zu B%s", h,
+                 why, app_n,
                  m.name[0] ? " — keeping the name an earlier one gave" : "");
+        else
+            dbg("announce from %s: not a member (%s), %zu B", h,
+                why ? why : "?", app_n);
         s_storeDirty = true;
     }
 }
