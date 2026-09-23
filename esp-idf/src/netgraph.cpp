@@ -1096,7 +1096,7 @@ bool collectPfxLine(uint8_t tag, const uint8_t* b, size_t n, void* vctx) {
  * turns any destination, from any source, into the same node key. */
 /* ── what counts as a NODE ──
  *
- * A DEVICE HOSTS SEVERAL IDENTITIES. Its transport identity, LXMF's, one per
+ * A DEVICE HOSTS SEVERAL IDENTITIES. Its node identity, LXMF's, one per
  * application — and the directory's "identity behind a destination" is the
  * owner of that ADDRESS, not the device. Keying vertices on it draws one
  * circle per identity: a three-node bench comes out as eight, three of them
@@ -1816,6 +1816,8 @@ struct Member {
      * sits on another identity entirely. */
     char     name[RNSD_PEER_NAME_MAX];
     uint32_t heard;
+    uint8_t  distance;      /* its declared gateway distance, RNSD_GW_NONE = none */
+    uint8_t  hops;          /* how far away the announce came from */
 };
 PSRAM_BSS Member s_members[NG_MAX_MEMBERS];
 
@@ -3163,6 +3165,9 @@ void ngManualSync() {
  * granted hashes. Set from whichever task saw the change; the netgraph task
  * re-derives, re-pushes the allow list and re-airs the membership announce. */
 volatile bool s_communityDirty = false;
+/* Only what the membership frame says moved (the gateway distance): re-compose
+ * and re-air it, nothing else. */
+volatile bool s_membershipDirty = false;
 
 /* The stock management address, split the way rnsd splits an aspect: app name
  * up to the first dot, the rest after it. */
@@ -3273,9 +3278,13 @@ void ngPublishCommunity() {
  *
  *   no community          no app_data at all
  *   a community           encrypt_to_community(
- *                             issued:u32 LE ‖ flags:u8 ‖ namelen:u8 ‖ name ‖ sig:64)
+ *                             issued:u32 LE ‖ flags:u8 ‖ distance:u8 ‖
+ *                             namelen:u8 ‖ name ‖ sig:64)
  *
- * flags bit0 = this node is an RNS transport node.
+ * flags bit0 = this node is an RNS transport node. distance = how many hops
+ * this node is from a gateway (rnsdGatewayDistance, RNSD_GW_NONE = none); a
+ * member that hears the announce directly hands it to rnsd, which is how every
+ * node's own distance is one more than its nearest neighbour's.
  *
  * ENCRYPTED OR NOTHING. A node's hostname and whether it forwards are facts
  * about somebody's device, and a management destination announces on every
@@ -3296,7 +3305,7 @@ void ngPublishCommunity() {
  *
  * THE NAME IS HERE BECAUSE THIS IS THE ONLY PLACE IT CAN BE. A device's name
  * belongs to the device, and the only address that IS the device is its
- * transport identity — which is exactly what this destination is built on. The
+ * node identity — which is exactly what this destination is built on. The
  * display name in an LXMF announce belongs to a person, sits on a different
  * identity, and nothing links the two on a medium that cannot attribute a
  * packet to a node. Without this, a graph of devices is a graph of hex — which
@@ -3309,7 +3318,7 @@ void ngPublishCommunity() {
  *
  * Stock clients ignore app_data on this destination, so none of this costs
  * compatibility. */
-#define NG_ANN_MIN       (4 + 1 + 1)
+#define NG_ANN_MIN       (4 + 1 + 1 + 1)
 #define NG_ANN_TRANSPORT 0x01
 #define NG_ANN_PLAIN_MAX (NG_ANN_MIN + RNSD_PEER_NAME_MAX + RNSD_SIG_LEN)
 #define NG_ANN_MAX       (NG_ANN_PLAIN_MAX + RNSD_ENCRYPT_OVERHEAD)
@@ -3335,6 +3344,7 @@ size_t ngAnnounceCompose(uint8_t* out, size_t outsz) {
     plain[n++] = (uint8_t)(issued >> 16);
     plain[n++] = (uint8_t)(issued >> 24);
     plain[n++] = storageGetInt("s.rnsd.transport_enabled", 0) ? NG_ANN_TRANSPORT : 0;
+    plain[n++] = rnsdGatewayDistance();
     plain[n++] = (uint8_t)nlen;
     std::memcpy(plain + n, name, nlen);
     n += nlen;
@@ -3372,6 +3382,7 @@ void ngMembershipPublish() {
 struct AnnOpened {
     bool        member;               /* decrypted AND the signature checked */
     bool        transport;
+    uint8_t     distance;             /* its gateway distance */
     char        name[RNSD_PEER_NAME_MAX];
     /* Why it did not open, for the log. A static string, never allocated. */
     const char* why;
@@ -3406,7 +3417,7 @@ bool ngAnnounceOpen(const uint8_t* app, size_t n, const uint8_t* who, AnnOpened*
     }
     if (pn < NG_ANN_MIN + RNSD_SIG_LEN) { out->why = "decrypted short"; return false; }
 
-    size_t nlen = plain[5];
+    size_t nlen = plain[6];
     size_t body = NG_ANN_MIN + nlen;
     if (body + RNSD_SIG_LEN != pn) { out->why = "bad shape"; return false; }
 
@@ -3422,6 +3433,7 @@ bool ngAnnounceOpen(const uint8_t* app, size_t n, const uint8_t* who, AnnOpened*
 
     out->member    = true;
     out->transport = (plain[4] & NG_ANN_TRANSPORT) != 0;
+    out->distance  = plain[5] > RNSD_GW_NONE ? RNSD_GW_NONE : plain[5];
     char raw[RNSD_PEER_NAME_MAX];
     size_t k = nlen < sizeof raw - 1 ? nlen : sizeof raw - 1;
     std::memcpy(raw, plain + NG_ANN_MIN, k);
@@ -3443,7 +3455,7 @@ bool ngAnnounceOpen(const uint8_t* app, size_t n, const uint8_t* who, AnnOpened*
 int s_mgmtSub = -1;
 
 void ngMemberNote(const uint8_t* id, const uint8_t* dest, bool member,
-                  const char* name, bool transport,
+                  const char* name, bool transport, uint8_t distance, uint8_t hops,
                   const char* why, size_t app_n) {
     int slot = -1, oldest = -1;
     for (int i = 0; i < NG_MAX_MEMBERS; i++) {
@@ -3465,6 +3477,8 @@ void ngMemberNote(const uint8_t* id, const uint8_t* dest, bool member,
     std::memcpy(m.dest, dest, RNSD_DEST_HASH_LEN);
     m.member = member;
     m.transport = transport;
+    m.distance = member ? distance : RNSD_GW_NONE;
+    m.hops = hops;
     /* An announce that carries no name does not erase the one we have: a node
      * that has not set a hostname yet is not a node that has been renamed to
      * nothing. */
@@ -3537,8 +3551,14 @@ void onMgmtAnnounce(int handle, size_t) {
          * name, the transport flag and membership need the key. */
         AnnOpened o;
         bool ours = ngAnnounceOpen(app, an, ident, &o);
+        uint8_t hops = buf[0];
         ngMemberNote(ident, dest, ours, ours ? o.name : "", ours && o.transport,
-                     o.why, an);
+                     o.distance, hops, o.why, an);
+        /* A member heard directly is a neighbour, and its distance to a
+         * gateway is one hop short of what ours can be through it. Only a
+         * member's word counts: the signature inside is what makes the number
+         * somebody in the community said. */
+        if (ours && hops == 1) rnsdGatewayNote(ident, o.distance);
     }
 }
 
@@ -4080,9 +4100,9 @@ void ngCrawlStart(const uint8_t* only) {
         /* ONLY NODES WE HAVE HEARD ANNOUNCE THE MANAGEMENT SERVICE.
          *
          * The graph's vertices are not the right gather set, because a vertex
-         * is an IDENTITY and a device hosts several — its transport identity,
-         * its LXMF identity, one per application. Only the transport identity
-         * has a management destination; asking any of the others is a link that
+         * is an IDENTITY and a device hosts several — its node identity, its
+         * LXMF identity, one per application. Only the node identity has a
+         * management destination; asking any of the others is a link that
          * cannot be built, and it costs a full crawl_timeout_s each before the
          * pass moves on. A node that has not announced the service cannot
          * answer, and a node that has is announcing it on the stock beat, so
@@ -4277,7 +4297,8 @@ void cliNetgraph(const char* args) {
          * it. A hostname has no bound this file knows, so a guessed width would
          * either truncate it or leave a gap. */
         struct Row { char id[2 * RNSD_IDENT_HASH_LEN + 1]; const char* ours;
-                     const char* trns; const char* name; char age[24]; };
+                     const char* trns; const char* name; char age[24];
+                     char dist[8]; unsigned hops; };
         PSRAM_BSS static Row rows[NG_MAX_MEMBERS];
         int n = 0;
         uint32_t now = nowUnix();
@@ -4289,6 +4310,10 @@ void cliNetgraph(const char* args) {
             r.ours = s_members[i].member    ? "yes" : "no";
             r.trns = s_members[i].transport ? "yes" : "no";
             r.name = s_members[i].name[0] ? s_members[i].name : "-";
+            r.hops = s_members[i].hops;
+            if (!s_members[i].member)                     safeStrncpy(r.dist, "-", sizeof r.dist);
+            else if (s_members[i].distance >= RNSD_GW_NONE) safeStrncpy(r.dist, "none", sizeof r.dist);
+            else std::snprintf(r.dist, sizeof r.dist, "%u", (unsigned)s_members[i].distance);
             if (clockSane() && tsSane(s_members[i].heard) && now > s_members[i].heard)
                 std::snprintf(r.age, sizeof r.age, "%us ago",
                               (unsigned)(now - s_members[i].heard));
@@ -4299,14 +4324,15 @@ void cliNetgraph(const char* args) {
         }
         if (!n) { cliPrintf("(no management announce heard yet)\n"); return; }
 
-        cliPrintf("%-*s %-4s %-4s %-*s %s\n",
-                  (int)w_id, "identity", "ours", "trns", (int)w_name, "name", "heard");
+        cliPrintf("%-*s %-4s %-4s %-4s %-4s %-*s %s\n",
+                  (int)w_id, "identity", "ours", "trns", "gw", "hops", (int)w_name, "name", "heard");
         for (int i = 0; i < n; i++)
-            cliPrintf("%-*s %-4s %-4s %-*s %s\n",
-                      (int)w_id, rows[i].id, rows[i].ours, rows[i].trns,
-                      (int)w_name, rows[i].name, rows[i].age);
+            cliPrintf("%-*s %-4s %-4s %-4s %-4u %-*s %s\n",
+                      (int)w_id, rows[i].id, rows[i].ours, rows[i].trns, rows[i].dist,
+                      rows[i].hops, (int)w_name, rows[i].name, rows[i].age);
         cliPrintf("\n`ours` is a frame that decrypted and verified; the other "
-                  "columns are only meaningful when it does.\n");
+                  "columns are only meaningful when it does. `gw` is the node's own "
+                  "gateway distance, `hops` how far away its last announce came from.\n");
         return;
     }
     if (cliVerbIs(sub, "crawl", 1)) {
@@ -4502,6 +4528,10 @@ void netgraphTask(void*) {
                             ON_CHANGE { (void)key; (void)val; s_communityDirty = true; });
     storageSubscribeChanges("s.rnsd.transport_enabled",
                             ON_CHANGE { (void)key; (void)val; s_communityDirty = true; });
+    /* The gateway distance is carried in the frame too, and it is the one fact
+     * in it that neighbours act on — rnsd airs this re-compose early. */
+    storageSubscribeChanges("rnsd.gateway.distance",
+                            ON_CHANGE { (void)key; (void)val; s_membershipDirty = true; });
     /* The settings collection's mutations. The pane never writes the array
      * itself, so these are the only writers and the validation in
      * ngAllowAdd cannot be bypassed. */
@@ -4537,7 +4567,7 @@ void netgraphTask(void*) {
             /* A visit in flight: come back for its deadline, and for the next
              * node the moment it finishes. */
             if (s_ask.used) soonest(s_ask.deadline_ms);
-            if (s_crawlNow || s_communityDirty) soonest(now);
+            if (s_crawlNow || s_communityDirty || s_membershipDirty) soonest(now);
             for (int i = 0; i < NG_INBOUND_MAX; i++) {
                 if (!s_sess[i].used) continue;
                 soonest(s_sess[i].active_ms + NG_SYNC_IDLE_MS);
@@ -4598,6 +4628,11 @@ void netgraphTask(void*) {
                 ngPushAllowList();
                 ngMembershipPublish();
             }
+            s_membershipDirty = false;
+        }
+        if (s_membershipDirty) {
+            s_membershipDirty = false;
+            if (cfgServe() && rnsdRemoteManagementServing()) ngMembershipPublish();
         }
         if (s_crawlNow) {
             s_crawlNow = false;

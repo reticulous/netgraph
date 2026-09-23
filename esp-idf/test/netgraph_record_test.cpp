@@ -130,6 +130,8 @@ void rnsdRemoteManagementStop(void) {}
 void rnsdRemoteManagementAllow(const uint8_t (*)[16], int) {}
 bool rnsdRemoteManagementServing(void) { return false; }
 void rnsdRemoteManagementAnnounceData(const uint8_t*, size_t) {}
+uint8_t rnsdGatewayDistance(void) { return RNSD_GW_NONE; }
+void rnsdGatewayNote(const uint8_t*, uint8_t) {}
 void rnsdSetRemoteAsker(void (*)(const uint8_t*)) {}
 void rnsdSetNameResolver(bool (*)(const uint8_t*, char*, size_t)) {}
 bool rnsdIdentityExists(const char*) { return false; }

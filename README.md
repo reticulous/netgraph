@@ -149,7 +149,8 @@ is always about one specific node.
 
 **The management announce carries membership, encrypted or not at all.** With a
 community configured, this node's `rnstransport.remote.management` announce
-carries `issued ‖ flags ‖ name ‖ signature` encrypted to the community identity:
+carries `issued ‖ flags ‖ distance ‖ name ‖ signature` encrypted to the
+community identity:
 every member can read it because every member holds that private key, and nobody
 else can. The signature is what proves membership — encryption alone would not,
 since anyone holding the community *public* key can mint a token. Without a
@@ -157,10 +158,20 @@ community there is no app_data at all; the node is still perfectly askable,
 because the allow list and not the announce is what grants anything. Stock
 clients ignore app_data on this destination either way.
 
+**The distance is rnsd's number, carried here.** `distance` is how many radio
+hops this node is from a gateway (`rnsdGatewayDistance`, 8 = none). netgraph
+composes it into the frame, re-composes when `rnsd.gateway.distance` moves (rnsd
+then airs that one early), and hands every verified member's declaration heard
+at hops 1 back to rnsd (`rnsdGatewayNote`), which is how each node's own
+distance comes to be one more than its nearest neighbour's. rnsd uses it to
+decide which way a path request walks — see the rns README, "Finding the way
+out". `netgraph members` shows each member's declared distance and how many hops
+away its last announce came from.
+
 **The device's name lives here because this is the only place it can.** A
 device's name belongs to the device, and the only address that *is* the device is
-its node identity — which is what this destination is built on (rnsd relays
-under a separate transport identity, which owns no destinations). An LXMF
+its node identity — which is what this destination is built on, and what rnsd
+relays under. An LXMF
 display name belongs to a person, on a different identity. A community-less
 deployment therefore draws a graph of hex, and that is the price of the rule.
 
