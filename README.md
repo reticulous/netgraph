@@ -159,7 +159,8 @@ clients ignore app_data on this destination either way.
 
 **The device's name lives here because this is the only place it can.** A
 device's name belongs to the device, and the only address that *is* the device is
-its transport identity — which is what this destination is built on. An LXMF
+its node identity — which is what this destination is built on (rnsd relays
+under a separate transport identity, which owns no destinations). An LXMF
 display name belongs to a person, on a different identity. A community-less
 deployment therefore draws a graph of hex, and that is the price of the rule.
 
@@ -336,12 +337,15 @@ for each:
 
 - **Lines take the medium's colour** — the same `rns.pill.<class>.color` its
   status-line pill uses, read live, and the legend names it with the
-  `rns.pill.<class>.title` that straddle publishes beside it. One vocabulary for
+  `rns.pill.<class>.title` published beside it. One vocabulary for
   "which medium" on every surface, and no palette and no table of media in the
-  app. This is why an interface straddle publishes its colour from boot rather
-  than from the moment its medium is switched on: a LoRa link between two other
-  nodes is still a LoRa link on a node whose own radio is off, and drawing it in
-  the fallback grey would say something false about the network.
+  app. This is why a colour is published from boot rather than from the moment
+  its medium is switched on: a LoRa link between two other nodes is still a LoRa
+  link on a node whose own radio is off, and drawing it in the fallback grey
+  would say something false about the network. An interface straddle publishes
+  its own entry; LoRa's comes from `rnsd`, because the radio straddle is staged
+  only by a board that carries a modem and the graph on a radioless board draws
+  the community's LoRa links all the same.
 - **Parallel links are parallel arcs.** A peer reachable over both LoRa and
   Bluetooth is a peer that stays reachable, and that is the interesting fact on
   a mesh; one line between the circles would hide exactly it. The bundle between
