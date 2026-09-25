@@ -4576,11 +4576,13 @@ void netgraphTask(void*) {
                 if (s_sess[i].qi < s_sess[i].qn || s_sess[i].want_done) soonest(now + 300);
             }
         }
+        /* Rounded up to the next tick: rounded down, anything due inside the
+         * current tick is a wait of zero, and the loop spins until it comes. */
         int32_t delta = (int32_t)(due - now);
         itsPoll(!want  ? portMAX_DELAY
               : !s_up  ? pdMS_TO_TICKS(5000)     /* wanted, but the destination
                                                     would not open — retry */
-              : delta <= 0 ? 0 : pdMS_TO_TICKS((uint32_t)delta));
+              : delta <= 0 ? 0 : pdMS_TO_TICKS((uint32_t)delta) + 1);
 
         if (s_enableDirty) { s_enableDirty = false; continue; }
         if (!s_up) continue;
