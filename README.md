@@ -514,6 +514,9 @@ netgraph s[ync] <hash>            run a record exchange by hand
 netgraph r[ebuild]                rebuild our own record
 ```
 
+A `<hash>` or `<prefix>` may contain spaces, and a full 64-hex hash is taken as
+its leading 32; the allow-list setting is read the same way.
+
 Run any of these on-device through `spangap cli "<command>"`.
 
 ## Tests

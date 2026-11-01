@@ -3644,14 +3644,17 @@ void ngAllowAck() {
     storageSet("netgraph.allow.done", ++ack);
 }
 
-/** Normalized, or "" — trimmed, lower-cased, and only if it really is a
- *  32-character identity hash. */
+/** Normalized, or "" — every space removed, lower-cased, a full-length hash
+ *  cut to its leading 16 bytes, and only if it really is a 32-character
+ *  identity hash. */
 std::string ngAllowNormalize(const std::string& raw) {
     std::string h;
     for (char c : raw) {
         if (std::isspace((unsigned char)c)) continue;
         h += (char)std::tolower((unsigned char)c);
     }
+    uint8_t full[2 * RNSD_IDENT_HASH_LEN];
+    if (h.size() == 2 * sizeof full && unhex(h.c_str(), full, sizeof full)) h.resize(2 * RNSD_IDENT_HASH_LEN);
     uint8_t tmp[RNSD_IDENT_HASH_LEN];
     return unhex(h.c_str(), tmp, RNSD_IDENT_HASH_LEN) ? h : std::string();
 }
@@ -4165,8 +4168,18 @@ void cliNetgraph(const char* args) {
         cliPrintf("netgraph r[ebuild]           rebuild our own record\n");
         return;
     }
-    char sub[16] = {}, arg[40] = {};
-    std::sscanf(args, "%15s %39s", sub, arg);
+    char sub[16] = {};
+    int subLen = 0;
+    std::sscanf(args, "%15s%n", sub, &subLen);
+    /* Every verb's argument is one hash or prefix, so the rest of the line is
+     * it with the spaces of a grouped paste taken out, and a full-length hash
+     * is cut to the 16 bytes it truncates to. */
+    std::string argS;
+    for (const char* p = args + subLen; *p; p++)
+        if (!std::isspace((unsigned char)*p)) argS += *p;
+    uint8_t full[2 * RNSD_IDENT_HASH_LEN];
+    if (argS.size() == 2 * sizeof full && unhex(argS.c_str(), full, sizeof full)) argS.resize(2 * RNSD_IDENT_HASH_LEN);
+    const char* arg = argS.c_str();
 
     /* Both listings copy out under the lock and print outside it. Printing is
      * console I/O; holding the store lock across it would park the netgraph
