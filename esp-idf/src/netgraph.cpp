@@ -1086,7 +1086,8 @@ bool collectPfxLine(uint8_t tag, const uint8_t* b, size_t n, void* vctx) {
  * record is originated by — so a routed node either lands on the vertex that
  * speaks for itself, or gets one of its own that says it does not. */
 
-/* Every address this device has heard, not every node: thirty nodes announcing
+/* Every address this device has heard within radius + 1 hops (ngDirCollect),
+ * not every node: thirty nodes announcing
  * four aspects each is 120 rows, and a walk that stopped at 96 would drop a
  * quarter of this node's OWN evidence before the resolver ever saw it. */
 #define NG_MAX_DIR 256
@@ -1199,8 +1200,13 @@ bool ngIfaceLive(const char* iface) {
     return false;
 }
 
-void ngDirCollect(const rnsd_dir_entry_t* e, void*) {
+/* `ctx` is the service radius. Nothing past radius + 1 hops can be crawled or
+ * drawn, and behind a busy gateway those addresses are most of the directory —
+ * loading them fills the table before nearer evidence is reached. An address
+ * with no route has no hop count and is kept. */
+void ngDirCollect(const rnsd_dir_entry_t* e, void* ctx) {
     if (s_ndir >= NG_MAX_DIR || !e->have_identity) return;
+    if (e->have_route && e->hops > *(const int*)ctx + 1) return;
     DirEnt& d = s_dir[s_ndir++];
     std::memcpy(d.dest, e->dest, RNSD_DEST_HASH_LEN);
     std::memcpy(d.id,   e->identity, RNSD_IDENT_HASH_LEN);
@@ -2203,7 +2209,8 @@ void ngResolve() {
     /* Who owns which address, for every address this device has heard. Loaded
      * first because every pass below resolves through it. */
     s_ndir = 0;
-    rnsdDirForEach(ngDirCollect, nullptr);
+    int radius = cfgRadius();
+    rnsdDirForEach(ngDirCollect, &radius);
     /* And our own addresses, which appear in no directory at all — the half a
      * neighbour's report of us resolves through. */
     s_nOwnDest = 0;

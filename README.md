@@ -469,7 +469,7 @@ else.
 | `s.netgraph.passphrase` | *(empty)* | The community's passphrase. An ordinary setting rather than a secret: every node in the community holds it, and the *derived* key is what lives in the secrets tier. Changing either re-derives, re-pushes the allow list and re-airs the membership announce. |
 | `s.netgraph.serve` | `1` | Answer `/path` and `/status` on the stock management address. Only the community and the identities below may ask; an unidentified request is refused. |
 | `s.netgraph.allow.<i>.{id,hash}` | — | Identity hashes allowed to query this node besides the community, as a collection the settings pane binds rows to. Same form as stock `remote_management_allowed`, so a line copies straight across either way. Written only through the `netgraph.allow.add`/`.remove` command keys, which is why no UI parses a hash. |
-| `s.netgraph.radius` | `2` | How many hops out a crawl goes. |
+| `s.netgraph.radius` | `2` | How many hops out a crawl goes. It also bounds the address directory the resolver joins through: an address routed more than radius + 1 hops away is left out, so a busy gateway's far side cannot crowd nearer evidence out of the 256-entry table. |
 | `s.netgraph.crawl_timeout_s` | `20` | How long one visit may take before the crawl gives up on that node and moves to the next. |
 | `s.netgraph.heard_h` | `3` | Evidence unheard for this long leaves the drawing. Lines are removed rather than dimmed: everything on the picture is current. |
 | `s.netgraph.rebuild_floor_s` | `600` | Minimum seconds between rebuilds of this node's own record. The floor is what stops a node joining a busy neighbourhood from re-flooding its record once per neighbour: a burst of changes coalesces into one rebuild. |
